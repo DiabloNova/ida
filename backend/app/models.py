@@ -80,3 +80,15 @@ class Alert(BaseModel):
     priority: str
     message: str
     expires_at: datetime
+
+
+class AlertSubscriptionCreate(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    radius_m: int = Field(default=3000, ge=100, le=20000)
+    min_severity: Severity = Severity.elevated
+
+
+class AlertSubscription(AlertSubscriptionCreate):
+    id: UUID = Field(default_factory=uuid4)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

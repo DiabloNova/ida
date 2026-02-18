@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from app.main import ALERTS, REPORTS, app
+from app.main import ALERTS, REPORTS, SUBSCRIPTIONS, app
 
 
 client = TestClient(app)
@@ -11,6 +11,7 @@ client = TestClient(app)
 def setup_function() -> None:
     REPORTS.clear()
     ALERTS.clear()
+    SUBSCRIPTIONS.clear()
 
 
 def sample_payload(severity: int = 3) -> dict:
@@ -68,3 +69,39 @@ def test_list_reports_by_radius() -> None:
     nearby_response = client.get("/v1/reports?lat=35.6892&lng=51.389&radius_m=500")
     assert nearby_response.status_code == 200
     assert len(nearby_response.json()) == 1
+
+
+def test_subscription_alerts_are_filtered_by_area_and_severity() -> None:
+    sub_response = client.post(
+        "/v1/subscriptions",
+        json={
+            "lat": 35.6892,
+            "lng": 51.389,
+            "radius_m": 2000,
+            "min_severity": 4,
+        },
+    )
+    assert sub_response.status_code == 200
+    subscription = sub_response.json()
+
+    high_report = client.post("/v1/reports", json=sample_payload(severity=4))
+    assert high_report.status_code == 200
+
+    far_payload = sample_payload(severity=5)
+    far_payload["lat"] = 36.2605
+    far_payload["lng"] = 59.6168
+    far_response = client.post("/v1/reports", json=far_payload)
+    assert far_response.status_code == 200
+
+    alerts_response = client.get(f"/v1/subscriptions/{subscription['id']}/alerts")
+    assert alerts_response.status_code == 200
+
+    alerts = alerts_response.json()
+    assert len(alerts) == 1
+    assert alerts[0]["priority"] == "high"
+
+
+def test_subscription_not_found() -> None:
+    response = client.get("/v1/subscriptions/6fa459ea-ee8a-3ca4-894e-db77e160355e/alerts")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "subscription_not_found"

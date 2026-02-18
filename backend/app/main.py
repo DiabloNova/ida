@@ -7,12 +7,20 @@ from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query
 
-from .models import Alert, IncidentCreate, IncidentReport, Severity
+from .models import (
+    Alert,
+    AlertSubscription,
+    AlertSubscriptionCreate,
+    IncidentCreate,
+    IncidentReport,
+    Severity,
+)
 
 app = FastAPI(title="IDA Safety API", version="0.1.0")
 
 REPORTS: Dict[UUID, IncidentReport] = {}
 ALERTS: Dict[UUID, Alert] = {}
+SUBSCRIPTIONS: Dict[UUID, AlertSubscription] = {}
 
 
 def haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -97,4 +105,36 @@ def list_alerts(
         alert
         for alert in active_alerts
         if haversine_m(lat, lng, alert.center_lat, alert.center_lng) <= alert.radius_m
+    ]
+
+
+@app.post("/v1/subscriptions", response_model=AlertSubscription)
+def create_subscription(payload: AlertSubscriptionCreate) -> AlertSubscription:
+    subscription = AlertSubscription(**payload.model_dump())
+    SUBSCRIPTIONS[subscription.id] = subscription
+    return subscription
+
+
+@app.get("/v1/subscriptions/{subscription_id}/alerts", response_model=list[Alert])
+def list_subscription_alerts(subscription_id: UUID) -> list[Alert]:
+    subscription = SUBSCRIPTIONS.get(subscription_id)
+    if not subscription:
+        raise HTTPException(status_code=404, detail="subscription_not_found")
+
+    now = datetime.now(timezone.utc)
+    return [
+        alert
+        for alert in ALERTS.values()
+        if alert.expires_at > now
+        and haversine_m(
+            subscription.lat,
+            subscription.lng,
+            alert.center_lat,
+            alert.center_lng,
+        )
+        <= min(subscription.radius_m, alert.radius_m)
+        and (
+            (alert.priority == "critical" and subscription.min_severity.value <= Severity.critical.value)
+            or (alert.priority == "high" and subscription.min_severity.value <= Severity.high.value)
+        )
     ]
